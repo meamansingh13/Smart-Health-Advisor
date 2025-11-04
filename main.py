@@ -7,6 +7,10 @@ import pickle
 import os
 import google.generativeai as genai
 from dotenv import load_dotenv
+from medicine_utils import get_medicine_alternatives
+import difflib
+import ast
+import requests
 
 # Load environment variables
 load_dotenv()
@@ -219,6 +223,32 @@ def chat():
     """Render the emotional support chat page."""
     return render_template('chat.html', user=session.get('user'))
 
+@app.route('/alternatives')
+def alternatives_page():
+    """Render the medicine alternatives search page."""
+    return render_template('alternatives.html', user=session.get('user'))
+
+@app.route('/api/medicine-alternatives', methods=['POST'])
+def medicine_alternatives_api():
+    """API endpoint for medicine alternatives search with pricing."""
+    try:
+        data = request.get_json() or {}
+        medicine = (data.get('medicine') or '').strip()
+        if not medicine:
+            return jsonify({'error': 'Please provide a medicine name.'}), 400
+
+        # Get alternatives with price estimates
+        alternatives = get_medicine_alternatives(medicine, medications)
+        
+        return jsonify({
+            'alternatives': alternatives,
+            'message': 'Showing available alternatives with estimated prices. Actual prices may vary.'
+        })
+
+    except Exception as e:
+        print('Error in /api/medicine-alternatives:', repr(e))
+        return jsonify({'error': 'Failed to find alternatives. Please try again.'}), 500
+
 
 @app.route('/chat_api', methods=['POST'])
 def chat_api():
@@ -231,6 +261,127 @@ def chat_api():
     except Exception as e:
         print('Error in /chat_api:', repr(e))
         return jsonify({'reply': 'Sorry — an error occurred while processing your message.', 'type': 'error'}), 500
+
+
+# ----------------- Alternate Medicine Finder -----------------
+def _build_medication_index():
+    """Build a flattened list of medication names from the medications dataframe."""
+    meds_list = []
+    try:
+        for row in medications['Medication'].values:
+            try:
+                # the CSV stores a Python-like list as string, parse it
+                parsed = ast.literal_eval(row) if isinstance(row, str) and row.strip().startswith('[') else [row]
+            except Exception:
+                # fallback: treat as single string
+                parsed = [row]
+            for m in parsed:
+                if m and isinstance(m, str):
+                    meds_list.append(m.strip())
+    except Exception:
+        pass
+    # deduplicate while preserving order
+    seen = set()
+    meds_unique = []
+    for m in meds_list:
+        key = m.lower()
+        if key not in seen:
+            seen.add(key)
+            meds_unique.append(m)
+    return meds_unique
+
+
+MEDICATION_INDEX = _build_medication_index()
+
+
+def find_alternatives_local(query, max_results=6):
+    """Find alternatives from local `medications` dataset using fuzzy matching.
+
+    Returns list of alternative medication names. This is a dataset-only fallback and does
+    not include price comparisons. To get priced results, set the `ALTERNATE_MEDICINE_API`
+    environment variable to a provider API key and point the code to a real endpoint.
+    """
+    if not query:
+        return []
+    q = query.strip().lower()
+    # direct substring matches first
+    matches = [m for m in MEDICATION_INDEX if q in m.lower()]
+    # fuzzy matches next
+    if len(matches) < max_results:
+        fuzzy = difflib.get_close_matches(query, MEDICATION_INDEX, n=max_results, cutoff=0.6)
+        for f in fuzzy:
+            if f not in matches:
+                matches.append(f)
+    # Also look for medications that appear in the same disease groups
+    # If we can find a disease row that contains the medication, return other meds from that row
+    try:
+        # find disease rows where Medication column contains the queried med (case-insensitive)
+        related = []
+        for _, row in medications.iterrows():
+            medcell = str(row.get('Medication', ''))
+            if query.lower() in medcell.lower():
+                try:
+                    parsed = ast.literal_eval(medcell) if medcell.strip().startswith('[') else [medcell]
+                except Exception:
+                    parsed = [medcell]
+                for m in parsed:
+                    if isinstance(m, str) and m not in related and query.lower() not in m.lower():
+                        related.append(m)
+        for r in related:
+            if r not in matches:
+                matches.append(r)
+    except Exception:
+        pass
+
+    return matches[:max_results]
+
+
+@app.route('/alternate-medicine', methods=['POST'])
+def alternate_medicine():
+    """Return cheaper / good alternatives for a given medicine.
+
+    - If `ALTERNATE_MEDICINE_API` is not set in the environment, returns local dataset-based
+      alternatives and a message instructing the user to add the API key in `.env`.
+    - If `ALTERNATE_MEDICINE_API` is set, attempt to call an external provider (placeholder
+      URL). If the external call fails, falls back to local alternatives.
+    """
+    try:
+        data = request.get_json() or {}
+        medicine = (data.get('medicine') or '').strip()
+        if not medicine:
+            return jsonify({'error': 'Please provide a medicine name.'}), 400
+
+        api_key = os.getenv('ALTERNATE_MEDICINE_API')
+        if not api_key:
+            # local fallback
+            alts = find_alternatives_local(medicine)
+            return jsonify({
+                'source': 'local',
+                'message': 'ALTERNATE_MEDICINE_API not set in .env. Showing dataset-based alternatives. To get priced alternatives configure ALTERNATE_MEDICINE_API in your .env file.',
+                'alternatives': alts
+            })
+
+        # If we have an API key, attempt to call an external service.
+        # NOTE: This is a placeholder URL. Replace with your provider's endpoint.
+        external_url = os.getenv('ALTERNATE_MEDICINE_ENDPOINT', 'https://api.medalternatives.example/search')
+        try:
+            resp = requests.get(external_url, params={'q': medicine}, headers={'Authorization': f'Bearer {api_key}'}, timeout=8)
+            if resp.ok:
+                # Expecting JSON list of alternatives from external provider
+                return jsonify({'source': 'api', 'alternatives': resp.json()})
+            else:
+                # fallback
+                alts = find_alternatives_local(medicine)
+                return jsonify({'source': 'fallback', 'message': 'External API returned an error; showing local alternatives.', 'alternatives': alts})
+        except Exception as e:
+            alts = find_alternatives_local(medicine)
+            return jsonify({'source': 'fallback', 'message': f'Error calling external API: {str(e)}', 'alternatives': alts})
+
+    except Exception as e:
+        print('Error in /alternate-medicine:', repr(e))
+        return jsonify({'error': 'Internal server error'}), 500
+
+# -----------------------------------------------------------
 
 # -----------------------------------------------------------
 

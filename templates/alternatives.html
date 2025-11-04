@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Find Medicine Alternatives - Smart Health Advisor</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { 
+            background-color: #f8f9fa;
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+        }
+        .search-container {
+            max-width: 800px;
+            margin: 40px auto;
+            padding: 20px;
+        }
+        .result-card {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 15px;
+            padding: 15px;
+        }
+        .price-badge {
+            background: #e9ecef;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.9em;
+            color: #495057;
+        }
+        .savings-badge {
+            background: #d4edda;
+            color: #155724;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.9em;
+        }
+        .medicine-name {
+            color: #2c3e50;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+        .medicine-details {
+            color: #6c757d;
+            font-size: 0.9em;
+        }
+        .search-box {
+            border-radius: 25px;
+            padding: 10px 20px;
+            font-size: 1.1em;
+        }
+        .search-btn {
+            border-radius: 25px;
+            padding: 10px 25px;
+        }
+        .loader {
+            border: 3px solid #f3f3f3;
+            border-radius: 50%;
+            border-top: 3px solid #3498db;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+            vertical-align: middle;
+            margin-right: 10px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-light bg-light">
+        <div class="container">
+            <a class="navbar-brand" href="/">Smart Health Advisor</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/">Home</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/chat">Chat Support</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="/alternatives">Medicine Alternatives</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/about">About</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container search-container">
+        <div class="text-center mb-4">
+            <h2>Find Cheaper Medicine Alternatives</h2>
+            <p class="text-muted">Enter a medicine name to find more affordable alternatives with similar effects</p>
+        </div>
+
+        <div class="row justify-content-center mb-4">
+            <div class="col-md-8">
+                <div class="input-group">
+                    <input type="text" id="medicineInput" class="form-control search-box" 
+                           placeholder="Enter medicine name (e.g., Metformin, Fluconazole)">
+                    <button class="btn btn-primary search-btn" type="button" id="searchBtn">
+                        Search Alternatives
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div id="searchResults">
+            <!-- Results will be populated here -->
+        </div>
+
+        <div class="text-center mt-4">
+            <p class="text-muted small">
+                Note: Prices shown are approximate market rates and may vary by location and pharmacy.
+                Always consult a healthcare provider before switching medications.
+            </p>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        const medicineInput = document.getElementById('medicineInput');
+        const searchBtn = document.getElementById('searchBtn');
+        const resultsDiv = document.getElementById('searchResults');
+
+        async function searchAlternatives() {
+            const query = medicineInput.value.trim();
+            if (!query) return;
+
+            searchBtn.disabled = true;
+            resultsDiv.innerHTML = `
+                <div class="text-center py-4">
+                    <span class="loader"></span>
+                    <span>Searching for alternatives...</span>
+                </div>
+            `;
+
+            try {
+                const response = await fetch('/api/medicine-alternatives', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ medicine: query })
+                });
+
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to fetch alternatives');
+                }
+
+                // Display results
+                if (!data.alternatives || data.alternatives.length === 0) {
+                    resultsDiv.innerHTML = `
+                        <div class="text-center py-4">
+                            <p class="text-muted">No alternatives found for "${query}". Try another medicine name.</p>
+                        </div>
+                    `;
+                    return;
+                }
+
+                let html = '';
+                data.alternatives.forEach(alt => {
+                    const savingsClass = alt.savings > 20 ? 'savings-badge' : 'price-badge';
+                    html += `
+                        <div class="result-card">
+                            <div class="d-flex justify-content-between align-items-start">
+                                <div>
+                                    <div class="medicine-name">${alt.name}</div>
+                                    <div class="medicine-details">${alt.description || 'Alternative medication'}</div>
+                                </div>
+                                <div class="text-end">
+                                    <div class="price-badge">₹${alt.price.toFixed(2)}</div>
+                                    ${alt.savings ? `
+                                        <div class="mt-1 ${savingsClass}">
+                                            Save ${alt.savings}%
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            </div>
+                            ${alt.warning ? `
+                                <div class="mt-2 small text-danger">
+                                    <strong>Note:</strong> ${alt.warning}
+                                </div>
+                            ` : ''}
+                        </div>
+                    `;
+                });
+
+                resultsDiv.innerHTML = html;
+
+                if (data.message) {
+                    resultsDiv.insertAdjacentHTML('afterbegin', `
+                        <div class="alert alert-info" role="alert">
+                            ${data.message}
+                        </div>
+                    `);
+                }
+
+            } catch (error) {
+                resultsDiv.innerHTML = `
+                    <div class="alert alert-danger" role="alert">
+                        ${error.message || 'Failed to fetch alternatives. Please try again.'}
+                    </div>
+                `;
+            } finally {
+                searchBtn.disabled = false;
+            }
+        }
+
+        searchBtn.addEventListener('click', searchAlternatives);
+        medicineInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') searchAlternatives();
+        });
+    </script>
+</body>
+</html>
