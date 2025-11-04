@@ -29,8 +29,13 @@
       }
 
       .hero-section {
-        background: url('/static/medical-bg.jpg') no-repeat center center/cover;
-        padding: 100px 0;
+        background: linear-gradient(180deg, rgba(0,123,255,0.6), rgba(0,86,179,0.6)), url('/static/medical-bg.jpg');
+        background-repeat: no-repeat;
+        background-position: center center;
+        background-size: cover;
+        /* fallback to existing image if medical-bg.jpg not present */
+        background-image: linear-gradient(180deg, rgba(0,123,255,0.6), rgba(0,86,179,0.6)), url('/static/img.png');
+        padding: 80px 0;
         text-align: center;
         color: white;
       }
@@ -80,7 +85,7 @@
         margin-bottom: 30px;
         text-align: center;
       }
-      .hero-box {
+  .hero-box {
       /* background-color: rgba(255, 255, 255, 0.15); Light glass effect */
       background: rgba(0, 0, 0, 0.4);
       backdrop-filter: blur(5px);
@@ -89,10 +94,6 @@
       max-width: 600px;
       }
       .hero-section {
-        background: url('/static/medical-bg.jpg') no-repeat center center/cover;
-        padding: 100px 0;
-        text-align: center;
-        color: white;
         z-index: 1;
       }
       .hero-section::before {
@@ -125,6 +126,7 @@
             <li class="nav-item"><a class="nav-link" href="/">Home</a></li>
             <li class="nav-item"><a class="nav-link" href="/about">About</a></li>
             <li class="nav-item"><a class="nav-link" href="/contact">Contact</a></li>
+            <li class="nav-item"><a class="nav-link" href="/chat">Support Chat</a></li>
             <li class="nav-item"><a class="nav-link" href="/blog">Blog</a></li>
           </ul>
           <ul class="navbar-nav ms-auto">
@@ -161,7 +163,7 @@
     <div class="hero-box mx-auto p-4">
       <h1 class="display-4 fw-bold">Your AI Health Partner</h1>
       <p class="lead">Describe your symptoms and get AI-based health insights in seconds.</p>
-      <a href="#predict-form" class="btn btn-lg btn-light mt-3">Consult Now</a>
+      <button id="consultBtn" class="btn btn-lg btn-light mt-3">Consult Now</button>
     </div>
     </div>
     </section>
@@ -169,8 +171,48 @@
 
     
 
-    <!-- AI Consultation Form -->
-    <section id="predict-form" class="section">
+    <!-- Modal-based Consultation (opens without scrolling) -->
+    <div class="modal fade" id="consultModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title">AI Consultation</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <div id="loaderOverlay" class="d-none text-center my-3">
+              <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+              </div>
+              <p class="mt-2">Checking symptoms, please wait...</p>
+            </div>
+
+            <div id="consultForm" class="container-glass p-3">
+              <label for="modalSymptoms" class="form-label">Enter your symptoms (comma separated)</label>
+              <div class="input-group mb-3">
+                <input type="text" class="form-control" id="modalSymptoms" placeholder="e.g. fever, cough">
+                <button class="btn btn-outline-secondary" type="button" onclick="startListening(true)" title="Speak symptoms">
+                  <i class="bi bi-mic-fill"></i>
+                </button>
+              </div>
+              <div class="text-end">
+                <button id="submitSymptoms" class="btn btn-primary">Diagnose</button>
+              </div>
+            </div>
+
+            <div id="resultsContainer" class="mt-3 d-none">
+              <!-- Results will be injected here -->
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Keep original form as non-JS fallback (hidden) -->
+    <section id="predict-form" class="section d-none">
       <div class="container">
         <div class="container-glass">
           <h2 class="text-center mb-4">Get Your Diagnosis</h2>
@@ -291,6 +333,133 @@
     recognition.onresult = function (event) {
       const transcript = event.results[0][0].transcript;
       document.getElementById("symptoms").value = transcript;
+    };
+
+    recognition.onerror = function (event) {
+      alert("Error occurred in recognition: " + event.error);
+    };
+
+    recognition.start();
+  }
+</script>
+
+<script>
+  // Modal and AJAX flow
+  const consultBtn = document.getElementById('consultBtn');
+  const consultModal = new bootstrap.Modal(document.getElementById('consultModal'));
+  const submitBtn = document.getElementById('submitSymptoms');
+  const loader = document.getElementById('loaderOverlay');
+  const resultsContainer = document.getElementById('resultsContainer');
+
+  consultBtn.addEventListener('click', () => {
+    // clear previous
+    document.getElementById('modalSymptoms').value = '';
+    resultsContainer.classList.add('d-none');
+    resultsContainer.innerHTML = '';
+    consultModal.show();
+  });
+
+  submitBtn.addEventListener('click', async () => {
+    const symptoms = document.getElementById('modalSymptoms').value.trim();
+    if (!symptoms) {
+      alert('Please enter your symptoms.');
+      return;
+    }
+
+    // show loader
+    loader.classList.remove('d-none');
+    resultsContainer.classList.add('d-none');
+
+    try {
+      const formData = new URLSearchParams();
+      formData.append('symptoms', symptoms);
+
+      const resp = await fetch('/predict', {
+        method: 'POST',
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest',
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body: formData.toString()
+      });
+
+      loader.classList.add('d-none');
+
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ error: 'Unknown error' }));
+        alert(err.error || 'Failed to get diagnosis');
+        return;
+      }
+
+      const data = await resp.json();
+      renderResultsInModal(data);
+    } catch (e) {
+      loader.classList.add('d-none');
+      alert('Network error: ' + e.message);
+    }
+  });
+
+  function renderResultsInModal(data) {
+    resultsContainer.innerHTML = `
+      <div class="card p-3 mb-3">
+        <h5 class="text-primary">Predicted Disease</h5>
+        <p class="fw-bold fs-4">${data.predicted_disease}</p>
+      </div>
+      <div class="card p-3 mb-3">
+        <h5 class="text-success">Description</h5>
+        <p>${data.description || ''}</p>
+      </div>
+      <div class="row g-3">
+        <div class="col-md-6">
+          <div class="card p-3">
+            <h6 class="text-warning">Precautions</h6>
+            <ul>${(data.precautions || []).map(i=>`<li>${i}</li>`).join('')}</ul>
+          </div>
+        </div>
+        <div class="col-md-6">
+          <div class="card p-3">
+            <h6 class="text-danger">Medications</h6>
+            <ul>${(data.medications || []).map(i=>`<li>${i}</li>`).join('')}</ul>
+          </div>
+        </div>
+        <div class="col-md-6">
+          <div class="card p-3">
+            <h6 class="text-dark">Workouts</h6>
+            <ul>${(data.workout || []).map(i=>`<li>${i}</li>`).join('')}</ul>
+          </div>
+        </div>
+        <div class="col-md-6">
+          <div class="card p-3">
+            <h6 class="text-secondary">Recommended Diet</h6>
+            <ul>${(data.diet || []).map(i=>`<li>${i}</li>`).join('')}</ul>
+          </div>
+        </div>
+      </div>
+    `;
+
+    loader.classList.add('d-none');
+    resultsContainer.classList.remove('d-none');
+  }
+
+  // modified startListening to support modal input
+  function startListening(useModal = false) {
+    if (!('webkitSpeechRecognition' in window)) {
+      alert("Speech recognition not supported in this browser. Please use Chrome.");
+      return;
+    }
+
+    const recognition = new webkitSpeechRecognition();
+    recognition.lang = "en-US";
+    recognition.continuous = false;
+    recognition.interimResults = false;
+
+    recognition.onresult = function (event) {
+      const transcript = event.results[0][0].transcript;
+      if (useModal) {
+        document.getElementById('modalSymptoms').value = transcript;
+      } else {
+        document.getElementById('symptoms').value = transcript;
+      }
     };
 
     recognition.onerror = function (event) {
