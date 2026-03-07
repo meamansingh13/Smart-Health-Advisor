@@ -17,7 +17,7 @@ load_dotenv()
 
 # Configure Gemini AI
 genai.configure(api_key=os.getenv('GEMINI_API_KEY'))
-model = genai.GenerativeModel('gemini-2.5-flash')
+model = genai.GenerativeModel('gemini-3-flash-preview')
 
 # Flask app
 app = Flask(__name__)
